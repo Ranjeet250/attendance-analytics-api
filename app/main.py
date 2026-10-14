@@ -137,7 +137,70 @@ class RegularizeIn(BaseModel):
     punch_in: Optional[EpochMs] = None
     punch_out: Optional[EpochMs] = None
     reason: str = Field(min_length=5, max_length=200)
-    regularized_by: str = Field(min_length=1, max_length=50) 
+    regularized_by: str = Field(min_length=1, max_length=50)
+
+
+def half_up(value, places="0.01"):
+    return float(Decimal(value).quantize(Decimal(places), rounding=ROUND_HALF_UP))
+
+
+def working_days_in(month, joined_on):
+    y, m = map(int, month.split("-"))
+    first = date(y, m, 1)
+    last = date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)
+    d = max(first, date.fromisoformat(joined_on))
+    n = 0
+    while d <= last:
+        if d.weekday() < 5:
+            n += 1
+        d += timedelta(days=1)
+    return n
+
+
+@app.get("/analytics/employees/{emp_code}/monthly")
+def employee_monthly(
+    emp_code: str,
+    month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+):
+    emp = db.employees.find_one({"emp_code": emp_code})
+    if not emp:
+        raise HTTPException(404, "employee not found")
+    pipeline = [
+        {"$match": {"emp_code": emp_code, "date": {"$gte": f"{month}-01", "$lte": f"{month}-31"}}},
+        {"$addFields": {"_dow": {"$dayOfWeek": {"$dateFromString": {"dateString": "$date"}}}}},
+        {"$group": {
+            "_id": None,
+            "present_days": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$in": ["$status", list(PRESENCE)]},
+                    {"$gte": ["$_dow", 2]},
+                    {"$lte": ["$_dow", 6]},
+                ]},
+                {"$cond": [{"$eq": [{"$ifNull": ["$half_day", False]}, True]}, 0.5, 1]},
+                0,
+            ]}},
+            "leave_days": {"$sum": {"$cond": [{"$eq": ["$status", "LEAVE"]}, 1, 0]}},
+            "late_count": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$late_minutes", 0]}, 0]}, 1, 0]}},
+            "total_late_minutes": {"$sum": {"$ifNull": ["$late_minutes", 0]}},
+            "total_overtime_minutes": {"$sum": {"$ifNull": ["$overtime_minutes", 0]}},
+        }},
+    ]
+    rows = list(db.attendance_logs.aggregate(pipeline))
+    s = rows[0] if rows else {}
+    present = float(s.get("present_days", 0))
+    wd = working_days_in(month, emp["joined_on"])
+    pct = half_up(Decimal(str(present)) * 100 / Decimal(wd)) if wd else None
+    return {
+        "emp_code": emp_code,
+        "month": month,
+        "working_days": wd,
+        "present_days": present,
+        "leave_days": s.get("leave_days", 0),
+        "late_count": s.get("late_count", 0),
+        "total_late_minutes": s.get("total_late_minutes", 0),
+        "total_overtime_minutes": s.get("total_overtime_minutes", 0),
+        "attendance_pct": pct,
+    } 
 # --------------------------------------------------------------------------- #
 # Endpoints provided
 # --------------------------------------------------------------------------- #
