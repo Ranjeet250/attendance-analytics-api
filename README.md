@@ -1,26 +1,40 @@
-# Candidate kit
+# Employee Attendance and Analytics API
 
-Read in this order:
+FastAPI + MongoDB. All application code is in `app/main.py`.
 
-1. `PROBLEM_STATEMENT.docx`: what you are asked to do, how it is evaluated.
-2. `openapi.yaml`: the API contract and the business rules (R1 - R10).
-3. `DATA_MODEL.md`: what is stored in MongoDB, with nine sample documents.
-4. `app/main.py`: the starter. Put **all** your code in this one file. It must start with `uvicorn app.main:app --port 8000`.
-5. `REVIEW.md`, `DECISIONS.md`: templates to fill in.
+## Run
 
-`sample_data/` holds the nine sample documents as MongoDB Extended JSON; `sample_seed.py` loads them. The grader's dataset is
-much larger and contains cases they do not show.
-
-## Local setup
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env            # set MONGO_URI / MONGO_DB (local docker: docker run -p 27017:27017 mongo:7)
-python sample_seed.py
-uvicorn app.main:app --port 8000 --reload
 ```
-MongoDB **6.0 or newer** is required (the grader uses 7.0). MongoDB Atlas free tier (M0) works.
+python -m venv .venv
+.venv\Scripts\activate          # Windows (on Linux/macOS: source .venv/bin/activate)
+pip install -r requirements.txt
+uvicorn app.main:app --port 8000
+```
 
-## Submit
-A public Git repository with `app/main.py`, `requirements.txt`, `REVIEW.md`, `DECISIONS.md` and a short `README.md`.
-No `.env`, no secrets, no Dockerfile.
+Configuration is read from the environment: `MONGO_URI` (default `mongodb://localhost:27017`) and `MONGO_DB` (default `attendance_db`). A local `.env` is loaded for convenience, but real environment variables take priority. All indexes are created at startup and re-running is harmless.
+
+## Implemented
+
+- GET /health
+- POST /employees, GET /employees
+- POST /attendance/punch-in, POST /attendance/punch-out
+- PATCH /attendance/{emp_code}/{date} (corrections, history, recomputed derived fields)
+- GET /attendance
+- GET /analytics/employees/{emp_code}/monthly (aggregation pipeline)
+- GET /admin/explain/{endpoint} for `attendance_list` and `employee_monthly`
+
+## Not implemented (ran out of time)
+
+- GET /analytics/departments/summary
+- GET /analytics/leaderboard/late
+- GET /analytics/departments/{department}/trend
+
+`/admin/explain/` returns 501 for `department_summary`, `late_leaderboard` and `department_trend`.
+
+## Notes
+
+- Instants are epoch milliseconds in the API and UTC datetimes in MongoDB. Dates and shift times are IST.
+- Punch-out closes the most recent record whose punch-in is at or before `punched_at`, so overnight shifts work.
+- Concurrent corrections: a write only applies if the record's history has not changed since it was read, otherwise the request gets 409 and can be retried, so no history entry is lost.
+- Tested by hand through `/docs` with the sample documents plus a few records I created myself (overnight shift, weekend punch, mid-month joiner).
+- I could not finish the 100,000-record check of the explain plans on my machine (it ran out of disk space), so the IXSCAN check was only done on the small sample data.

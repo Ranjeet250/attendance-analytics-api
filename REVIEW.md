@@ -14,6 +14,7 @@ List every defect you found in the starter `app/main.py` (helpers and endpoints)
 | 4 | list_employees, page and page_size parameters | No bounds on page or page_size, so page=0 gives a negative skip and a 500, and page_size=0 or 1000 is accepted although R10 caps it at 100 | GET /employees?page=0 returns a server error, GET /employees?page_size=1000 is accepted | Used Query(1, ge=1) for page and Query(20, ge=1, le=100) for page_size so bad values return 422 |
 
 | 5 | EmployeeIn model | No format checks on email, shift_start, shift_end, joined_on, so garbage is saved | POST /employees with email abc, shift_start 25:99, joined_on hello returns 201 and is stored | Added Field(pattern=...) for each so invalid values return 422 |
+Added a field validator that parses joined_on as a real date, so 2026-13-45 also returns 422.
 
 | 6 | create_employee, created_at | datetime.now() is naive local time (IST), PyMongo stores it as if it were UTC, so created_at is 5h30m ahead of real UTC | created_at showed 2026-10-12T00:18 UTC while the response Date header said 18:52 GMT on 11 Oct | Changed to datetime.now(timezone.utc) |
 
@@ -50,3 +51,5 @@ List every defect you found in the starter `app/main.py` (helpers and endpoints)
 | 22 | list_attendance, parameters and sort | Nothing validated page, page_size, dates or status, there was no tie-break in the sort (the contract says date descending, then emp_code ascending), and date_from after date_to was accepted. | GET /attendance?page=0, ?page_size=1000, ?status=BANANA and ?date_from=2026-07-10&date_to=2026-07-01 all returned 200. | Query bounds with ge and le, a regex plus a real date check, a Literal for status, a 422 when date_from is after date_to, and sort by date descending then emp_code ascending. |
 
 | 23 | list_attendance, response and indexes | The response exposed an id built from \_id, returned datetimes instead of epoch milliseconds, did not default half_day and history for seeded records, and no index backed the filters or the sort, so the plan is a collection scan. | GET /attendance returned id and ISO time strings. Explain on the filter shows COLLSCAN. | Responses go through attendance_out, and two compound indexes are created at startup: (date desc, emp_code) and (status, date desc, emp_code). |
+
+| 24 | lifespan, index creation | Two of the index creation lines were written after yield, so they would only run at shutdown and the indexes would never exist at startup. | Compass showed only the \_id and (emp_code, date) indexes after the app started. | Moved every create_index call before yield, so all indexes are created at startup and re-running is harmless. |

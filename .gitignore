@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 sample_data/
 sample_seed.py
+seed_100k.py
